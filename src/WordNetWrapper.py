@@ -3,6 +3,7 @@ from wiki_ru_wordnet import WikiWordnet
 
 from settings import SUPPORTED_WORDNETS
 
+
 class WordNetWrapper:
     def __init__(self, wordnet):
         if not isinstance(wordnet, SUPPORTED_WORDNETS):
