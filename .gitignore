@@ -3,3 +3,4 @@ data/
 notebooks/
 .ipynb_checkpoints/
 __pycache__/
+out/

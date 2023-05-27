@@ -1,11 +1,8 @@
-from ruwordnet import RuWordNet
-from wiki_ru_wordnet import WikiWordnet
-
-import sys
 import gensim
 
-from WordNetWrapper import WordNetWrapper
-from LexSubScorer import LexSubScorer
+from wordnetwrapper import WordNetWrapper
+from lexsubscorer import LexSubScorer
+from model import TargetWord, Substitute, Sentence
 from settings import BASE_DIR
 
 
@@ -39,6 +36,7 @@ class LexSub:
             for synset in self._get_synsets(word)
             for sense in self.wordnet.get_synset_senses(synset)
         }
+        synonyms.discard(word)
         print("Synonym candidates: {}".format(synonyms))
         return synonyms
 
@@ -49,6 +47,7 @@ class LexSub:
             for hypernym in self.wordnet.get_synset_hypernyms(synset)
             for sense in self.wordnet.get_synset_senses(hypernym)
         }
+        hypernyms.discard(word)
         print("Hypernym candidates: {}".format(hypernyms))
         return hypernyms
 
@@ -59,16 +58,17 @@ class LexSub:
             for hyponym in self.wordnet.get_synset_hyponyms(synset)
             for sense in self.wordnet.get_synset_senses(hyponym)
         }
+        hyponyms.discard(word)
         print("Hyponymm candidates: {}".format(hyponyms))
         return hyponyms
 
-    def _get_candidates(self, semtype, *args):
-        semtypes = {
+    def _get_candidates(self, semtype):
+        supported_semtypes = {
             "synonym": self._get_synonym_candidates,
             "hyponym": self._get_hyponym_candidates,
             "hypernym": self._get_hypernym_candidates,
         }
-        return semtypes[semtype](*args)
+        return supported_semtypes[semtype](self.target_word.lemma)
 
     def _get_score(self, measure, *args):
         measures = {
@@ -79,20 +79,27 @@ class LexSub:
         }
         return measures[measure](*args)
 
-    def _rank_candidates(self, candidates, contexts, target_word, topn, measure):
+    def _rank_candidates(self, candidates, contexts, topn, measure):
+        candidates = map(Substitute, candidates)
         ranks = {
-            candidate: self._get_score(
-                measure, self.model.similarity, candidate, target_word, contexts
+            candidate.inflect(self.target_word.grammemes): round(
+                self._get_score(
+                    measure,
+                    self.model.similarity,
+                    candidate.name,
+                    self.target_word.lemma,
+                    contexts,
+                ),
+                3,
             )
             for candidate in candidates
         }
         return sorted(ranks.items(), key=lambda x: x[1], reverse=True)[:topn]
 
-    def _get_contexts(self, sentence, target_word, window):
-        words = list(gensim.utils.tokenize(sentence))
-        twx = words.index(target_word)
-        left_context = words[twx - window : twx]
-        right_context = words[twx + 1 : twx + 1 + window]
+    def _get_contexts(self, window):
+        twx = self.target_word.idx
+        left_context = self.sentence.tokens[twx - window : twx]
+        right_context = self.sentence.tokens[twx + 1 : twx + 1 + window]
         return (*left_context, *right_context)
 
     def get_substitutes(
@@ -100,7 +107,7 @@ class LexSub:
         sentence,
         target_word,
         semtype="synonym",
-        topn=10,
+        topn=None,
         measure="add",
         context_window=2,
     ):
@@ -109,20 +116,11 @@ class LexSub:
                 semtype, target_word, sentence
             )
         )
+        self.sentence = Sentence(sentence)
+        self.target_word = TargetWord(target_word, self.sentence)
         return self._rank_candidates(
-            target_word=target_word,
             topn=topn,
             measure=measure,
-            candidates=self._get_candidates(semtype, target_word),
-            contexts=self._get_contexts(sentence, target_word, context_window),
+            candidates=self._get_candidates(semtype),
+            contexts=self._get_contexts(context_window),
         )
-
-
-if __name__ == "__main__":
-    lexsub = LexSub("geowac_fasttextskipgram_300_5_2020", RuWordNet())
-    sent = "Сегодня я сдаю экзамен по математике"
-    for sub, score in lexsub.get_substitutes(sent, "экзамен"):
-        print("{}\t{}".format(score, sub))
-    print()
-    for sub, score in lexsub.get_substitutes(sent, "математике"):
-        print("{}\t{}".format(score, sub))
